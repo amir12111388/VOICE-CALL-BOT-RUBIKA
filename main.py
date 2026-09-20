@@ -1,172 +1,208 @@
-import os
-import asyncio
-import logging
-from pathlib import Path
-from collections import defaultdict, deque
+import inspect
+import pkgutil
+import importlib
+import rubpy
 
-from rubpy import Client, handlers, filters
-from rubpy.types import Update
+from rubpy import Client
 
 
-# ============================================================
-# CONFIG
-# ============================================================
+print("=" * 70)
+print("RUBPY RTC INSPECTION")
+print("=" * 70)
 
-TOKEN = os.getenv("RUBIKA_BOT_TOKEN")
+print("Rubpy version:", getattr(rubpy, "__version__", "unknown"))
 
-if not TOKEN:
-    raise RuntimeError(
-        "RUBIKA_BOT_TOKEN تنظیم نشده است."
-    )
-
-DOWNLOAD_DIR = Path("downloads")
-DOWNLOAD_DIR.mkdir(exist_ok=True)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-
-logger = logging.getLogger("RubikaVoiceBot")
+client = Client("RTC_TEST")
 
 
-# ============================================================
-# STATE
-# ============================================================
+# ---------------------------------------------------------
+# 1. بررسی متدهای اصلی Voice Chat
+# ---------------------------------------------------------
 
-music_queues = defaultdict(deque)
-active_voice_chats = {}
-voice_connections = {}
+targets = [
+    "join_voice_chat",
+    "voice_chat_player",
+    "leave_group_voice_chat",
+    "get_group_voice_chat_updates",
+]
 
+for name in targets:
+    print("\n" + "=" * 70)
+    print("METHOD:", name)
 
-# ============================================================
-# HELPERS
-# ============================================================
+    fn = getattr(client, name, None)
 
-def get_guid(update):
-    return getattr(
-        update,
-        "object_guid",
-        None
-    )
-
-
-def get_text(update):
-    return getattr(
-        update,
-        "raw_text",
-        None
-    )
-
-
-async def reply(update, text):
-    try:
-        await update.reply(text)
-    except Exception as exc:
-        logger.error("Reply error: %s", exc)
-
-
-# ============================================================
-# PRIVATE MESSAGE
-# ============================================================
-
-async def private_messages(update: Update):
+    if fn is None:
+        print("NOT FOUND")
+        continue
 
     try:
-
-        print("\n" + "=" * 50)
-        print("NEW MESSAGE")
-        print("=" * 50)
-
-        print("Object GUID:",
-              getattr(update, "object_guid", None))
-
-        print("Author GUID:",
-              getattr(update, "author_object_guid", None))
-
-        print("Message ID:",
-              getattr(update, "message_id", None))
-
-        print("Raw text:",
-              getattr(update, "raw_text", None))
-
-        print("Message object:")
-        print(update)
-
-        print("=" * 50)
-
-        text = get_text(update)
-
-        if text == "/start":
-
-            await reply(
-                update,
-                "🎵 ربات موزیک ویس‌کال فعال است.\n\n"
-                "یک آهنگ برای من ارسال کن."
-            )
-
-    except Exception as exc:
-
-        logger.exception(
-            "Message handler error: %s",
-            exc
-        )
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-async def main():
-
-    print("=" * 60)
-    print("        RUBIKA VOICE MUSIC BOT")
-    print("=" * 60)
-
-    print("Rubpy version: 7.3.5")
-    print("Token: configured")
-    print("RTC dependencies: installed")
-    print()
-
-    async with Client(
-        name="rubika_voice_bot",
-        auth=TOKEN
-    ) as client:
-
-        print("✅ Rubika client connected")
-
-        @client.on(
-            handlers.MessageUpdates(
-                filters.is_private
-            )
-        )
-        async def message_handler(
-            update: Update
-        ):
-            await private_messages(update)
-
-        print("✅ Private message handler registered")
-        print("🎵 Bot is running...")
-        print()
-
-        await client.run_until_disconnected()
-
-
-# ============================================================
-# START
-# ============================================================
-
-if __name__ == "__main__":
+        print("SIGNATURE:")
+        print(inspect.signature(fn))
+    except Exception as e:
+        print("SIGNATURE ERROR:", repr(e))
 
     try:
-        asyncio.run(main())
+        print("FILE:")
+        print(inspect.getfile(fn))
+    except Exception as e:
+        print("FILE ERROR:", repr(e))
 
-    except KeyboardInterrupt:
-        print("Bot stopped.")
 
-    except Exception as exc:
-        print(
-            "BOT ERROR:",
-            type(exc).__name__,
-            exc
-        )
+# ---------------------------------------------------------
+# 2. بررسی VoiceChatConnection
+# ---------------------------------------------------------
+
+print("\n" + "=" * 70)
+print("VOICE CHAT CONNECTION")
+print("=" * 70)
+
+try:
+    from rubpy.methods.advanced.voice_chat_player import VoiceChatConnection
+
+    print("FOUND VoiceChatConnection")
+
+    try:
+        print("SIGNATURE:")
+        print(inspect.signature(VoiceChatConnection))
+    except Exception as e:
+        print("SIGNATURE ERROR:", repr(e))
+
+    try:
+        print("\nSOURCE:")
+        print(inspect.getsource(VoiceChatConnection))
+    except Exception as e:
+        print("SOURCE ERROR:", repr(e))
+
+except Exception as e:
+    print("VoiceChatConnection ERROR:", repr(e))
+
+
+# ---------------------------------------------------------
+# 3. پیدا کردن فایل مربوط به voice_chat_player
+# ---------------------------------------------------------
+
+print("\n" + "=" * 70)
+print("VOICE CHAT PLAYER MODULE")
+print("=" * 70)
+
+try:
+    import rubpy.methods.advanced.voice_chat_player as player_module
+
+    print("MODULE FILE:")
+    print(inspect.getfile(player_module))
+
+    print("\nMODULE SOURCE:")
+    source = inspect.getsource(player_module)
+
+    # برای اینکه خروجی GitHub Actions بیش از حد بزرگ نشود
+    if len(source) > 30000:
+        print(source[:30000])
+        print("\n... SOURCE TRUNCATED ...")
+    else:
+        print(source)
+
+except Exception as e:
+    print("MODULE ERROR:", repr(e))
+
+
+# ---------------------------------------------------------
+# 4. جستجوی ماژول‌های RTC / WebRTC داخل Rubpy
+# ---------------------------------------------------------
+
+print("\n" + "=" * 70)
+print("SEARCHING RUBPY FOR RTC / SDP / WEBRTC")
+print("=" * 70)
+
+keywords = [
+    "sdp",
+    "rtc",
+    "webrtc",
+    "peerconnection",
+    "voice_chat",
+    "audio_track",
+    "createoffer",
+    "setlocaldescription",
+]
+
+found = []
+
+try:
+    for module_info in pkgutil.walk_packages(
+        rubpy.__path__,
+        rubpy.__name__ + "."
+    ):
+        module_name = module_info.name
+
+        try:
+            module = importlib.import_module(module_name)
+
+            try:
+                source_file = inspect.getfile(module)
+            except Exception:
+                continue
+
+            try:
+                source = inspect.getsource(module).lower()
+            except Exception:
+                continue
+
+            matches = [
+                keyword
+                for keyword in keywords
+                if keyword in source
+            ]
+
+            if matches:
+                found.append(
+                    (
+                        module_name,
+                        source_file,
+                        matches
+                    )
+                )
+
+        except Exception:
+            continue
+
+except Exception as e:
+    print("PACKAGE SEARCH ERROR:", repr(e))
+
+
+for module_name, source_file, matches in found:
+    print("\nMODULE:", module_name)
+    print("FILE:", source_file)
+    print("MATCHES:", ", ".join(matches))
+
+
+# ---------------------------------------------------------
+# 5. بررسی aiortc
+# ---------------------------------------------------------
+
+print("\n" + "=" * 70)
+print("AIORTC CHECK")
+print("=" * 70)
+
+try:
+    import aiortc
+
+    print("aiortc version:",
+          getattr(aiortc, "__version__", "unknown"))
+
+    from aiortc import RTCPeerConnection
+
+    print("RTCPeerConnection: FOUND")
+
+    try:
+        print("SIGNATURE:")
+        print(inspect.signature(RTCPeerConnection))
+    except Exception as e:
+        print("SIGNATURE ERROR:", repr(e))
+
+except Exception as e:
+    print("AIORTC ERROR:", repr(e))
+
+
+print("\n" + "=" * 70)
+print("RTC INSPECTION FINISHED")
+print("=" * 70)
