@@ -1,51 +1,48 @@
-import os
-import asyncio
+import inspect
 import rubpy
+from rubpy import Client
 
 
-TOKEN = os.getenv("RUBIKA_BOT_TOKEN")
+print("=" * 50)
+print("Rubpy Voice API Inspector")
+print("=" * 50)
 
-if not TOKEN:
-    raise RuntimeError("RUBIKA_BOT_TOKEN تنظیم نشده است")
+print("Rubpy version:", getattr(rubpy, "__version__", "unknown"))
 
+try:
+    client = Client("TEST")
 
-async def main():
-    print("=" * 40)
-    print("Rubika Voice Bot Test")
-    print("=" * 40)
+    methods = [
+        "join_voice_chat",
+        "voice_chat_player",
+        "leave_group_voice_chat",
+        "get_group_voice_chat_updates",
+    ]
 
-    print("Rubpy version:", getattr(rubpy, "__version__", "unknown"))
-    print("Token: configured")
+    for name in methods:
+        print("\n" + "-" * 50)
+        print(name)
 
-    try:
-        from rubpy import Client
+        method = getattr(client, name, None)
 
-        bot = Client(TOKEN)
+        if method is None:
+            print("NOT FOUND")
+            continue
 
-        print("Client: OK")
+        print("FOUND")
 
-        voice_player = getattr(bot, "voice_chat_player", None)
+        try:
+            print("Signature:")
+            print(inspect.signature(method))
+        except Exception as e:
+            print("Could not read signature:", e)
 
-        if voice_player:
-            print("VOICE_CHAT_PLAYER: FOUND")
-        else:
-            print("VOICE_CHAT_PLAYER: NOT FOUND")
+        try:
+            print("\nDocumentation:")
+            print(inspect.getdoc(method) or "No documentation")
+        except Exception as e:
+            print("Could not read documentation:", e)
 
-        methods = [
-            x for x in dir(bot)
-            if "voice" in x.lower() or "call" in x.lower()
-        ]
-
-        print("\nVoice/Call methods:")
-        for method in methods:
-            print(" -", method)
-
-        print("\nTest completed.")
-
-    except Exception as e:
-        print("ERROR:", type(e).__name__)
-        print(e)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+except Exception as e:
+    print("\nERROR:", type(e).__name__)
+    print(e)
