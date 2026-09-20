@@ -1,208 +1,267 @@
-import inspect
-import pkgutil
-import importlib
-import rubpy
+import os
+import asyncio
+import logging
+import wave
+import math
+from pathlib import Path
 
 from rubpy import Client
 
 
-print("=" * 70)
-print("RUBPY RTC INSPECTION")
-print("=" * 70)
+# =========================================================
+# CONFIG
+# =========================================================
 
-print("Rubpy version:", getattr(rubpy, "__version__", "unknown"))
+TOKEN = os.getenv("RUBIKA_BOT_TOKEN")
+CHAT_GUID = os.getenv("TEST_CHAT_GUID")
 
-client = Client("RTC_TEST")
+TEST_AUDIO = Path("rtc_test.wav")
+PLAY_SECONDS = 15
 
 
-# ---------------------------------------------------------
-# 1. بررسی متدهای اصلی Voice Chat
-# ---------------------------------------------------------
+# =========================================================
+# LOGGING
+# =========================================================
 
-targets = [
-    "join_voice_chat",
-    "voice_chat_player",
-    "leave_group_voice_chat",
-    "get_group_voice_chat_updates",
-]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
 
-for name in targets:
-    print("\n" + "=" * 70)
-    print("METHOD:", name)
+logger = logging.getLogger("RubikaRTC")
 
-    fn = getattr(client, name, None)
 
-    if fn is None:
-        print("NOT FOUND")
-        continue
+# =========================================================
+# CREATE TEST AUDIO
+# =========================================================
+
+def create_test_audio(path: Path):
+    """
+    یک فایل WAV ساده می‌سازد.
+    نیاز به دانلود هیچ فایل صوتی خارجی ندارد.
+    """
+
+    sample_rate = 48000
+    duration = 5
+    frequency = 440
+
+    channels = 1
+    sample_width = 2
+
+    total_samples = sample_rate * duration
+
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(sample_width)
+        wav.setframerate(sample_rate)
+
+        frames = bytearray()
+
+        for i in range(total_samples):
+            t = i / sample_rate
+
+            # صدای سینوسی تست
+            value = int(
+                16000 * math.sin(
+                    2 * math.pi * frequency * t
+                )
+            )
+
+            frames.extend(
+                value.to_bytes(
+                    2,
+                    byteorder="little",
+                    signed=True
+                )
+            )
+
+        wav.writeframes(frames)
+
+    logger.info(
+        "Test audio created: %s",
+        path
+    )
+
+
+# =========================================================
+# RTC TEST
+# =========================================================
+
+async def run_rtc_test(client: Client):
+
+    if not CHAT_GUID:
+        logger.error(
+            "TEST_CHAT_GUID is not configured."
+        )
+        logger.error(
+            "Add your Rubika group GUID as a GitHub Secret."
+        )
+        return
+
+    logger.info("=" * 60)
+    logger.info("STARTING REAL RUBIKA RTC TEST")
+    logger.info("=" * 60)
+
+    logger.info(
+        "Chat GUID: %s",
+        CHAT_GUID
+    )
+
+    # -----------------------------------------------------
+    # Create audio
+    # -----------------------------------------------------
+
+    create_test_audio(TEST_AUDIO)
+
+    # -----------------------------------------------------
+    # Start Voice Chat Player
+    # -----------------------------------------------------
+
+    logger.info(
+        "Calling client.voice_chat_player()..."
+    )
+
+    connection = None
 
     try:
-        print("SIGNATURE:")
-        print(inspect.signature(fn))
-    except Exception as e:
-        print("SIGNATURE ERROR:", repr(e))
 
-    try:
-        print("FILE:")
-        print(inspect.getfile(fn))
-    except Exception as e:
-        print("FILE ERROR:", repr(e))
+        connection = await client.voice_chat_player(
+            CHAT_GUID,
+            TEST_AUDIO
+        )
 
+        if connection is None:
+            logger.error(
+                "voice_chat_player returned None."
+            )
+            return
 
-# ---------------------------------------------------------
-# 2. بررسی VoiceChatConnection
-# ---------------------------------------------------------
+        logger.info(
+            "VoiceChatConnection created successfully."
+        )
 
-print("\n" + "=" * 70)
-print("VOICE CHAT CONNECTION")
-print("=" * 70)
-
-try:
-    from rubpy.methods.advanced.voice_chat_player import VoiceChatConnection
-
-    print("FOUND VoiceChatConnection")
-
-    try:
-        print("SIGNATURE:")
-        print(inspect.signature(VoiceChatConnection))
-    except Exception as e:
-        print("SIGNATURE ERROR:", repr(e))
-
-    try:
-        print("\nSOURCE:")
-        print(inspect.getsource(VoiceChatConnection))
-    except Exception as e:
-        print("SOURCE ERROR:", repr(e))
-
-except Exception as e:
-    print("VoiceChatConnection ERROR:", repr(e))
-
-
-# ---------------------------------------------------------
-# 3. پیدا کردن فایل مربوط به voice_chat_player
-# ---------------------------------------------------------
-
-print("\n" + "=" * 70)
-print("VOICE CHAT PLAYER MODULE")
-print("=" * 70)
-
-try:
-    import rubpy.methods.advanced.voice_chat_player as player_module
-
-    print("MODULE FILE:")
-    print(inspect.getfile(player_module))
-
-    print("\nMODULE SOURCE:")
-    source = inspect.getsource(player_module)
-
-    # برای اینکه خروجی GitHub Actions بیش از حد بزرگ نشود
-    if len(source) > 30000:
-        print(source[:30000])
-        print("\n... SOURCE TRUNCATED ...")
-    else:
-        print(source)
-
-except Exception as e:
-    print("MODULE ERROR:", repr(e))
-
-
-# ---------------------------------------------------------
-# 4. جستجوی ماژول‌های RTC / WebRTC داخل Rubpy
-# ---------------------------------------------------------
-
-print("\n" + "=" * 70)
-print("SEARCHING RUBPY FOR RTC / SDP / WEBRTC")
-print("=" * 70)
-
-keywords = [
-    "sdp",
-    "rtc",
-    "webrtc",
-    "peerconnection",
-    "voice_chat",
-    "audio_track",
-    "createoffer",
-    "setlocaldescription",
-]
-
-found = []
-
-try:
-    for module_info in pkgutil.walk_packages(
-        rubpy.__path__,
-        rubpy.__name__ + "."
-    ):
-        module_name = module_info.name
+        # -------------------------------------------------
+        # Print information
+        # -------------------------------------------------
 
         try:
-            module = importlib.import_module(module_name)
+            info = connection.get_info()
+
+            logger.info(
+                "VOICE CHAT INFO: %s",
+                info
+            )
+
+        except Exception as e:
+            logger.warning(
+                "Could not read connection info: %s",
+                e
+            )
+
+        # -------------------------------------------------
+        # Keep audio playing
+        # -------------------------------------------------
+
+        logger.info(
+            "Audio playback started."
+        )
+
+        logger.info(
+            "Waiting %s seconds...",
+            PLAY_SECONDS
+        )
+
+        await asyncio.sleep(PLAY_SECONDS)
+
+        logger.info(
+            "Playback test finished."
+        )
+
+    except Exception as e:
+
+        logger.exception(
+            "RTC TEST FAILED: %s",
+            e
+        )
+
+    finally:
+
+        # -------------------------------------------------
+        # Stop connection
+        # -------------------------------------------------
+
+        if connection is not None:
 
             try:
-                source_file = inspect.getfile(module)
-            except Exception:
-                continue
+                connection.stop()
 
-            try:
-                source = inspect.getsource(module).lower()
-            except Exception:
-                continue
-
-            matches = [
-                keyword
-                for keyword in keywords
-                if keyword in source
-            ]
-
-            if matches:
-                found.append(
-                    (
-                        module_name,
-                        source_file,
-                        matches
-                    )
+                logger.info(
+                    "Voice chat connection stopped."
                 )
 
-        except Exception:
-            continue
+            except Exception as e:
 
-except Exception as e:
-    print("PACKAGE SEARCH ERROR:", repr(e))
+                logger.warning(
+                    "Error while stopping connection: %s",
+                    e
+                )
 
+        # -------------------------------------------------
+        # Delete test audio
+        # -------------------------------------------------
 
-for module_name, source_file, matches in found:
-    print("\nMODULE:", module_name)
-    print("FILE:", source_file)
-    print("MATCHES:", ", ".join(matches))
+        try:
 
+            if TEST_AUDIO.exists():
+                TEST_AUDIO.unlink()
 
-# ---------------------------------------------------------
-# 5. بررسی aiortc
-# ---------------------------------------------------------
+                logger.info(
+                    "Temporary audio deleted."
+                )
 
-print("\n" + "=" * 70)
-print("AIORTC CHECK")
-print("=" * 70)
+        except Exception as e:
 
-try:
-    import aiortc
-
-    print("aiortc version:",
-          getattr(aiortc, "__version__", "unknown"))
-
-    from aiortc import RTCPeerConnection
-
-    print("RTCPeerConnection: FOUND")
-
-    try:
-        print("SIGNATURE:")
-        print(inspect.signature(RTCPeerConnection))
-    except Exception as e:
-        print("SIGNATURE ERROR:", repr(e))
-
-except Exception as e:
-    print("AIORTC ERROR:", repr(e))
+            logger.warning(
+                "Could not delete temporary audio: %s",
+                e
+            )
 
 
-print("\n" + "=" * 70)
-print("RTC INSPECTION FINISHED")
-print("=" * 70)
+# =========================================================
+# MAIN
+# =========================================================
+
+async def main():
+
+    logger.info("=" * 60)
+    logger.info("RUBIKA REAL RTC TEST")
+    logger.info("=" * 60)
+
+    if not TOKEN:
+        logger.error(
+            "RUBIKA_BOT_TOKEN is not configured."
+        )
+        return
+
+    logger.info(
+        "Bot token: configured"
+    )
+
+    async with Client(
+        name="rubika_rtc_test",
+        auth=TOKEN
+    ) as client:
+
+        logger.info(
+            "Rubpy client connected."
+        )
+
+        await run_rtc_test(client)
+
+
+# =========================================================
+# RUN
+# =========================================================
+
+if __name__ == "__main__":
+    asyncio.run(main())
